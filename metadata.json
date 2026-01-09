@@ -1,0 +1,5 @@
+{
+  "name": "RepoPacker",
+  "description": "Преобразуйте ZIP-архив GitHub репозитория в единый Markdown файл.",
+  "requestFramePermissions": []
+}
