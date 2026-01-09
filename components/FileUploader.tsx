@@ -14,14 +14,14 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, disabl
   };
 
   return (
-    <div className="w-full">
+    <div className={`w-full ${disabled ? 'pointer-events-none opacity-60' : ''}`}>
       <label
         className={`
           flex flex-col items-center justify-center w-full h-64 
           border-2 border-dashed rounded-lg cursor-pointer 
           transition-all duration-300
           ${disabled 
-            ? 'bg-slate-800/50 border-slate-700 cursor-not-allowed opacity-50' 
+            ? 'bg-slate-800/50 border-slate-700' 
             : 'bg-slate-800 border-slate-600 hover:border-blue-500 hover:bg-slate-750'
           }
         `}

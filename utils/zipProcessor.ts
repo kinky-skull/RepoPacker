@@ -5,26 +5,33 @@ import { ProcessedFile } from '../types';
 const TEXT_EXTENSIONS = new Set([
   'js', 'jsx', 'ts', 'tsx', 'json', 'css', 'scss', 'html', 'md', 'txt', 
   'py', 'java', 'c', 'cpp', 'h', 'cs', 'go', 'rs', 'php', 'rb', 'sh', 
-  'yaml', 'yml', 'xml', 'sql', 'gitignore', 'env', 'dockerfile'
+  'yaml', 'yml', 'xml', 'sql', 'gitignore', 'env', 'dockerfile', 'toml', 'gradle', 'properties'
 ]);
 
 // Directories to ignore
 const IGNORE_DIRS = new Set([
-  '.git', 'node_modules', 'dist', 'build', 'coverage', '.idea', '.vscode', '__pycache__'
+  '.git', 'node_modules', 'dist', 'build', 'coverage', '.idea', '.vscode', '__pycache__', 'bin', 'obj'
 ]);
 
 // Files to ignore
 const IGNORE_FILES = new Set([
-  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.DS_Store'
+  'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', '.DS_Store', 'thumbs.db'
 ]);
 
 const isTextFile = (filename: string): boolean => {
-  const parts = filename.split('.');
-  const ext = parts.pop()?.toLowerCase();
-  if (!ext) return false; // files without extension often binary or config, allow some safe ones?
-  // Check against allowlist or if it's a known config file
-  if (['dockerfile', 'makefile', 'license'].includes(parts.join('.').toLowerCase())) return true;
-  return TEXT_EXTENSIONS.has(ext);
+  // Get basename (filename without path)
+  const basename = filename.split('/').pop()?.toLowerCase();
+  if (!basename) return false;
+
+  // Check known config files without extension
+  if (['dockerfile', 'makefile', 'license', 'jenkinsfile', 'vagrantfile'].includes(basename)) return true;
+
+  // Get extension
+  const parts = basename.split('.');
+  if (parts.length === 1) return false; // Binary file or script without extension not in whitelist
+  
+  const ext = parts.pop();
+  return ext ? TEXT_EXTENSIONS.has(ext) : false;
 };
 
 const shouldIgnore = (path: string): boolean => {
@@ -39,21 +46,49 @@ const shouldIgnore = (path: string): boolean => {
   const filename = parts[parts.length - 1];
   if (IGNORE_FILES.has(filename)) return true;
   
-  // Ignore dotfiles generally (except .gitignore, .env which are handled in text check usually)
-  // But let's keep it simple: strict ignore list
   return false;
 };
 
+/**
+ * Generates a visual directory tree structure string
+ */
 export const generateTreeString = (paths: string[]): string => {
-  let output = '';
-  // Simple flat sort for tree view
-  paths.sort().forEach(path => {
-    const depth = path.split('/').length - 1;
-    const indent = '  '.repeat(depth);
-    const name = path.split('/').pop();
-    output += `${indent}- ${name}\n`;
+  const tree: any = {};
+
+  // Build tree object
+  paths.forEach(path => {
+    const parts = path.split('/');
+    let current = tree;
+    parts.forEach(part => {
+      if (!current[part]) {
+        current[part] = {};
+      }
+      current = current[part];
+    });
   });
-  return output;
+
+  // Recursive print function
+  const printTree = (node: any, prefix = ''): string => {
+    let output = '';
+    const keys = Object.keys(node).sort();
+    
+    keys.forEach((key, index) => {
+      const isLast = index === keys.length - 1;
+      const connector = isLast ? '└── ' : '├── ';
+      const childPrefix = isLast ? '    ' : '│   ';
+      const isFile = Object.keys(node[key]).length === 0;
+      
+      output += `${prefix}${connector}${key}${isFile ? '' : '/'}\n`;
+      
+      if (!isFile) {
+        output += printTree(node[key], prefix + childPrefix);
+      }
+    });
+    
+    return output;
+  };
+
+  return printTree(tree).trim();
 };
 
 export const processZipFile = async (
@@ -61,10 +96,15 @@ export const processZipFile = async (
   onProgress: (percent: number, message: string) => void
 ): Promise<{ files: ProcessedFile[], tree: string, stats: { fileCount: number, totalSize: number, tokenEstimate: number } }> => {
   
-  onProgress(10, "Чтение ZIP архива...");
+  onProgress(5, "Чтение ZIP архива...");
   
   const zip = new JSZip();
-  const loadedZip = await zip.loadAsync(file);
+  let loadedZip;
+  try {
+    loadedZip = await zip.loadAsync(file);
+  } catch (e) {
+    throw new Error("Не удалось открыть ZIP файл. Возможно он поврежден.");
+  }
   
   const files: ProcessedFile[] = [];
   const paths: string[] = [];
@@ -73,16 +113,18 @@ export const processZipFile = async (
   const fileEntries = Object.keys(loadedZip.files);
   const totalFiles = fileEntries.length;
   let processedCount = 0;
+  const textEncoder = new TextEncoder();
 
-  onProgress(20, "Фильтрация и распаковка...");
+  onProgress(10, "Анализ файлов...");
 
   for (const filename of fileEntries) {
     const zipEntry = loadedZip.files[filename];
-    
     processedCount++;
-    if (processedCount % 10 === 0) {
-      const progress = 20 + Math.floor((processedCount / totalFiles) * 70); // Up to 90%
-      onProgress(progress, `Обработка: ${filename}`);
+
+    // Update progress periodically or on last file to ensure we hit 100% of this phase
+    if (totalFiles > 0 && (processedCount % 5 === 0 || processedCount === totalFiles)) {
+      const progress = 10 + Math.floor((processedCount / totalFiles) * 80); // 10% -> 90%
+      onProgress(progress, `Обработка: ${filename.split('/').pop()}`);
     }
 
     if (zipEntry.dir) continue;
@@ -91,7 +133,9 @@ export const processZipFile = async (
     if (isTextFile(filename)) {
       paths.push(filename);
       const content = await zipEntry.async('string');
-      totalSize += content.length;
+      // Calculate accurate byte size for UTF-8
+      const byteLength = textEncoder.encode(content).length;
+      totalSize += byteLength;
       
       files.push({
         path: filename,
@@ -109,7 +153,7 @@ export const processZipFile = async (
     stats: {
       fileCount: files.length,
       totalSize,
-      tokenEstimate: Math.ceil(totalSize / 4)
+      tokenEstimate: Math.ceil(totalSize / 4) // Crude estimate: 4 chars (approx) per token
     }
   };
 };
@@ -126,10 +170,22 @@ export const createMarkdownContent = (
   md += `## 💻 File Contents\n\n`;
 
   files.forEach(f => {
+    // Generate a code fence that is longer than any fence inside the content
+    let fenceLength = 3;
+    const backticks = f.content.match(/`+/g);
+    if (backticks) {
+      for (const match of backticks) {
+        if (match.length >= fenceLength) {
+          fenceLength = match.length + 1;
+        }
+      }
+    }
+    const fence = '`'.repeat(fenceLength);
+
     md += `### ${f.path}\n`;
-    md += `\`\`\`${f.extension}\n`;
+    md += `${fence}${f.extension}\n`;
     md += f.content;
-    md += `\n\`\`\`\n\n`;
+    md += `\n${fence}\n\n`;
   });
 
   return md;

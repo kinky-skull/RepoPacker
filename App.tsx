@@ -1,8 +1,10 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { FileUploader } from './components/FileUploader';
 import { Icon } from './components/Icon';
 import { ProcessingState, ProcessingStatus } from './types';
 import { processZipFile, createMarkdownContent } from './utils/zipProcessor';
+
+const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100MB
 
 const App: React.FC = () => {
   const [state, setState] = useState<ProcessingState>({
@@ -11,7 +13,26 @@ const App: React.FC = () => {
     progress: 0,
   });
 
+  // Cleanup blob URL on unmount or when URL changes
+  useEffect(() => {
+    return () => {
+      if (state.resultUrl) {
+        URL.revokeObjectURL(state.resultUrl);
+      }
+    };
+  }, [state.resultUrl]);
+
   const handleProcess = useCallback(async (file: File) => {
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      setState({
+        status: ProcessingStatus.ERROR,
+        message: 'Ошибка валидации',
+        progress: 0,
+        error: `Файл слишком большой. Максимальный размер: ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB`
+      });
+      return;
+    }
+
     try {
       // 1. Start Processing
       setState({
@@ -35,11 +56,12 @@ const App: React.FC = () => {
         stats
       }));
 
-      const repoName = file.name.replace('.zip', '');
+      // Removes .zip safely from the end of string (case insensitive)
+      const repoName = file.name.replace(/\.zip$/i, '');
       const markdownContent = createMarkdownContent(repoName, tree, files);
 
       // 4. Create Blob URL
-      const blob = new Blob([markdownContent], { type: 'text/markdown' });
+      const blob = new Blob([markdownContent], { type: 'text/markdown;charset=utf-8' });
       const url = URL.createObjectURL(blob);
 
       setState({
@@ -62,14 +84,16 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const reset = () => {
-    if (state.resultUrl) URL.revokeObjectURL(state.resultUrl);
-    setState({
-      status: ProcessingStatus.IDLE,
-      message: '',
-      progress: 0
+  const reset = useCallback(() => {
+    setState(prev => {
+      if (prev.resultUrl) URL.revokeObjectURL(prev.resultUrl);
+      return {
+        status: ProcessingStatus.IDLE,
+        message: '',
+        progress: 0
+      };
     });
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 p-4 md:p-8 flex flex-col items-center">
@@ -90,7 +114,7 @@ const App: React.FC = () => {
           <div className="space-y-6">
             <FileUploader onFileSelect={handleProcess} />
             <div className="text-xs text-center text-slate-500">
-              Поддерживает .zip архивы. Обработка выполняется локально в браузере.
+              Поддерживает .zip архивы (макс. 100MB). Обработка выполняется локально.
             </div>
           </div>
         )}
