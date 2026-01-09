@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { FileUploader } from './components/FileUploader';
 import { Icon } from './components/Icon';
 import { ProcessingState, ProcessingStatus } from './types';
@@ -13,11 +13,17 @@ const App: React.FC = () => {
     progress: 0,
   });
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // Cleanup blob URL on unmount or when URL changes
   useEffect(() => {
     return () => {
       if (state.resultUrl) {
         URL.revokeObjectURL(state.resultUrl);
+      }
+      // Abort any ongoing process on unmount
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
       }
     };
   }, [state.resultUrl]);
@@ -33,6 +39,10 @@ const App: React.FC = () => {
       return;
     }
 
+    // Create new abort controller
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       // 1. Start Processing
       setState({
@@ -43,9 +53,13 @@ const App: React.FC = () => {
       });
 
       // 2. Unzip and extract text
-      const { files, tree, stats } = await processZipFile(file, (pct, msg) => {
-        setState(prev => ({ ...prev, progress: pct, message: msg }));
-      });
+      const { files, tree, stats } = await processZipFile(
+        file, 
+        (pct, msg) => {
+          setState(prev => ({ ...prev, progress: pct, message: msg }));
+        },
+        controller.signal
+      );
 
       // 3. Generate Markdown
       setState(prev => ({
@@ -74,6 +88,12 @@ const App: React.FC = () => {
       });
 
     } catch (error: any) {
+      // Ignore abort errors
+      if (error.name === 'AbortError' || error.message === 'Aborted') {
+        console.log('Processing cancelled');
+        return;
+      }
+      
       console.error(error);
       setState({
         status: ProcessingStatus.ERROR,
@@ -81,10 +101,15 @@ const App: React.FC = () => {
         progress: 0,
         error: error.message || 'Unknown error'
       });
+    } finally {
+      abortControllerRef.current = null;
     }
   }, []);
 
   const reset = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setState(prev => {
       if (prev.resultUrl) URL.revokeObjectURL(prev.resultUrl);
       return {
@@ -141,6 +166,13 @@ const App: React.FC = () => {
                 Найдено {state.stats.fileCount} файлов ({(state.stats.totalSize / 1024).toFixed(0)} KB)
               </p>
             )}
+
+            <button 
+              onClick={reset}
+              className="mt-6 px-4 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-400/10 rounded-lg transition-colors border border-red-400/20"
+            >
+              Отменить
+            </button>
           </div>
         )}
 

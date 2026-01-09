@@ -93,7 +93,8 @@ export const generateTreeString = (paths: string[]): string => {
 
 export const processZipFile = async (
   file: File, 
-  onProgress: (percent: number, message: string) => void
+  onProgress: (percent: number, message: string) => void,
+  signal?: AbortSignal
 ): Promise<{ files: ProcessedFile[], tree: string, stats: { fileCount: number, totalSize: number, tokenEstimate: number } }> => {
   
   onProgress(5, "Чтение ZIP архива...");
@@ -129,6 +130,11 @@ export const processZipFile = async (
   onProgress(10, "Анализ файлов...");
 
   for (const filename of fileEntries) {
+    // Check cancellation
+    if (signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
     const zipEntry = loadedZip.files[filename];
     processedCount++;
 
