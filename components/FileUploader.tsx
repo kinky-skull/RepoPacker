@@ -22,7 +22,7 @@ export const FileUploader: React.FC<FileUploaderProps> = ({ onFileSelect, disabl
           transition-all duration-300
           ${disabled 
             ? 'bg-slate-800/50 border-slate-700' 
-            : 'bg-slate-800 border-slate-600 hover:border-blue-500 hover:bg-slate-750'
+            : 'bg-slate-800 border-slate-600 hover:border-blue-500 hover:bg-slate-700/80'
           }
         `}
       >

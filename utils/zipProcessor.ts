@@ -112,6 +112,17 @@ export const processZipFile = async (
 
   const fileEntries = Object.keys(loadedZip.files);
   const totalFiles = fileEntries.length;
+  
+  // Check for empty zip
+  if (totalFiles === 0) {
+    onProgress(100, "Архив пустой");
+    return {
+      files: [],
+      tree: "(Empty Archive)",
+      stats: { fileCount: 0, totalSize: 0, tokenEstimate: 0 }
+    };
+  }
+
   let processedCount = 0;
   const textEncoder = new TextEncoder();
 
